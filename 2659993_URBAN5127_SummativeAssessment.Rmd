@@ -1,0 +1,1165 @@
+---
+title: "Summative Assessment"
+author: "2659993 (Student ID)"
+date: "`r format(Sys.time(), '%d/%m/%Y')`"
+output: html_document
+---
+
+# Gender Influence in the UK Adult Population Mental Health in 2018-2019
+
+## 1. Introduction
+
+The links between mental health and gender have become increasingly evident in 
+recent years, although most research in the field still minimises or ignores 
+gender differences in mental health (Patalay and Demkowicz, 2023). Spencer and 
+Broome (2023) call for an urgent need to better understand young women's mental 
+health, as an NHS digital survey shows rates of diagnosed mental illness rise as
+children approach adulthood: 15% of 7-10 years-old against 22% of 17-24 
+years-old have a diagnosable disorder (Newlove-Delgado et al., 2022). There is 
+also evidence that the decline in mental health during the Covid-19 outbreak was
+twice as large for women as for men in the UK (Etheridge and Spantig, 2022).
+
+Hence, this essay aims to address the following research question: "Is there a 
+gender gap in the UK adult population mental health in 2018-2019?". To answer 
+this, we will utilise data from the Understanding Society Wave 10 dataset (University of 
+Essex, 2023b). Understanding Society is the UK Household Longitudinal Study, a survey of 
+the members of approximately 40,000 households (Wave 1). It collects data on subjects 
+such as health, work, education, income, family and social life, with both objective and 
+subjective indicators. Waves indicate the answers of sample members in a particular year 
+(University of Essex, 2023a).
+
+Our outcome variable is the 12-Item Short Form Survey (SF-12) Mental Component Summary 
+(MCS). This is a derived variable that converts valid answers from questions on the 
+"Self-Completion SF12 Module" of the individuals' survey questionnaire into a 
+single mental functioning score. The score is a continuous scale ranging from 0 
+(low functioning) to 100 (high functioning) (University of Essex, 2023a).
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(gtsummary)
+library(textreg)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+library(lmtest)
+library(car)
+library(miceadds)
+library(sandwich)
+
+# Read in wave10_indresp
+wave10_indresp <- read.delim("Datasets/UKDA-6614-tab/tab/ukhls/j_indresp.tab", 
+                             sep = "\t", header = TRUE)
+
+# Selecting variables to be used
+project_dataset <- wave10_indresp %>%
+  select(j_sf12mcs_dv, j_age_dv, j_sex_dv, j_urban_dv, j_marstat,
+         j_qfhigh_dv, j_jbstat, j_fimnnet_dv, j_ethn_dv, j_sclonely, 
+         j_rach16_dv, j_howlng, j_hidp)
+
+# Setting negative values as missing
+project_dataset <- project_dataset %>%
+  mutate(j_sf12mcs_dv = case_when(j_sf12mcs_dv %in% c(-9, -8, -7) ~ as.double(NA),
+                          TRUE                       ~ j_sf12mcs_dv)) %>%
+  mutate(j_age_dv = case_when(j_age_dv %in% c(-9) ~ as.integer(NA),
+                          TRUE                       ~ j_age_dv)) %>%
+  mutate(j_urban_dv = case_when(j_urban_dv %in% c(-9) ~ as.integer(NA),
+                          TRUE                       ~ j_urban_dv)) %>%
+  mutate(j_sex_dv = case_when(j_sex_dv %in% c(-9, 0) ~ as.integer(NA),
+                          TRUE                       ~ j_sex_dv)) %>%
+  mutate(j_fimnnet_dv = case_when(j_fimnnet_dv %in% c(-9) ~ as.double(NA),
+                          TRUE                       ~ j_fimnnet_dv)) %>%
+  mutate(j_marstat = case_when(j_marstat %in% c(-9, -8, -7, -2, -1) ~ as.integer(NA),
+                          TRUE                       ~ j_marstat)) %>%
+  mutate(j_qfhigh_dv = case_when(j_qfhigh_dv %in% c(-9, -8) ~ as.integer(NA),
+                          TRUE                       ~ j_qfhigh_dv)) %>%
+  mutate(j_jbstat = case_when(j_jbstat %in% c(-9, -2, -1) ~ as.integer(NA),
+                          TRUE                       ~ j_jbstat)) %>%
+  mutate(j_ethn_dv = case_when(j_ethn_dv %in% c(-9) ~ as.integer(NA),
+                          TRUE                       ~ j_ethn_dv)) %>%
+  mutate(j_sclonely = case_when(j_sclonely %in% c(-9, -8, -7, -2, -1) ~ as.integer(NA),
+                          TRUE                       ~ j_sclonely)) %>%
+  mutate(j_rach16_dv = case_when(j_rach16_dv %in% c(-9, -8) ~ as.integer(NA),
+                          TRUE                       ~ j_rach16_dv)) %>%
+  mutate(j_howlng = case_when(j_howlng %in% c(-9, -7, -2, -1) ~ as.integer(NA),
+                          TRUE                       ~ j_howlng)) %>%
+  mutate(j_qfhigh_dv = case_when(j_qfhigh_dv %in% c(96) ~ as.integer(17),
+                          TRUE                       ~ j_qfhigh_dv)) %>%
+  mutate(j_jbstat = case_when(j_jbstat %in% c(97) ~ as.integer(12),
+                          TRUE                       ~ j_jbstat)) %>%
+  mutate(j_ethn_dv = case_when(j_ethn_dv %in% c(97) ~ as.integer(18),
+                          TRUE                       ~ j_ethn_dv))
+
+View(project_dataset)
+
+# Turning int variables into factor
+project_dataset <- mutate(project_dataset, j_urban_dv = factor(j_urban_dv, 
+                                                                 levels = 1:2, 
+                                                                 labels = c(
+                                          "Urban area", "Rural area")), 
+                          j_sex_dv = factor(j_sex_dv, levels = 1:2, labels = c(
+                            "Male", "Female")), j_sclonely = factor(j_sclonely, 
+                                                                   levels = 1:3, 
+                                                                   labels = c(
+                                        "Hardly ever or never", "Some of the time", 
+                                        "Often")),
+                          j_marstat = factor(j_marstat, levels = 1:9, labels = c(
+                            "Single", "Married", "Civil Partner (legal)", 
+                                               "Separated legally married", 
+                                               "Divorced", "Widowed", 
+                                               "Separated from Civil Partner", 
+                                               "A former Civil Partner", 
+                                               "Surviving Civil Partner")), j_qfhigh_dv = 
+                            factor(j_qfhigh_dv, levels = 1:17, labels = c(
+                                             "Higher degree", 
+                                             "1st degree or equivalent",
+                                             "Diploma in HE",
+                                             "Teaching qual. (not PGCE)", 
+                                             "Nursing/other med. qual.", 
+                                             "Other higher degree", "A level", 
+                                             "Welsh baccalaureate", 
+                                             "I'nationl baccalaureate", "AS level",
+                                             "Highers (Scot.)", 
+                                             "Cert. 6th year studies", 
+                                             "GCSE/O level", "CSE", 
+                                             "Standard/o/lower", 
+                                             "Other school cert.", 
+                                             "None of the listed")),
+                          j_jbstat = factor(j_jbstat, levels = 1:12, labels = c(
+                            "Self employed", "Paid employment (FT/PT)", 
+                                           "Unemployed", 
+                                           "Retired", "On maternity leave", 
+                                           "Family care or home", 
+                                           "Full-time student", 
+                                           "LT sick or disabled", 
+                                           "Govt training scheme", 
+                                           "Unpaid, family business", 
+                                           "On apprenticeship", 
+                                           "Doing something else")), 
+                          j_ethn_dv = factor(j_ethn_dv, levels = 1:18, labels =
+                                               c("british/english/scottish/welsh/northern irish", 
+                                                 "irish", "gypsy or irish traveller",
+                                                 "any other white background", 
+                                                 "white and black caribbean", 
+                                                 "white and black african", 
+                                                 "white and asian", 
+                                                 "any other mixed background", 
+                                                 "indian", "pakistani", "bangladeshi", 
+                                                 "chinese", 
+                                                 "any other asian background",
+                                                 "caribbean", "african", 
+                                                 "any other black background", 
+                                                 "arab", "any other ethnic group")),
+                          j_rach16_dv = factor(j_rach16_dv, levels = 1:2, labels = 
+                                                 c("Yes", "No")))
+glimpse(project_dataset)
+
+# Renaming our variables so it's easier to understand
+project_dataset_fv <- project_dataset %>%
+  rename(sf12mcs = j_sf12mcs_dv, age = j_age_dv, urban_rural = j_urban_dv, sex =
+            j_sex_dv, monthly_income = j_fimnnet_dv, marital_status = j_marstat, 
+         education = j_qfhigh_dv, job_status = j_jbstat, ethnic_group = j_ethn_dv,
+         lonely = j_sclonely, parental_resp = j_rach16_dv, hours_hw = j_howlng)
+
+glimpse(project_dataset_fv)
+
+# Reducing / re-aggregating categories of factor variables to make descriptive analysis and modelling more manageable
+levels(project_dataset_fv$marital_status) = c("Single","Married", "Married",
+                                                                "Divorced", 
+                                                                "Divorced", 
+                                                                "Widowed", 
+                                                                "Divorced", 
+                                                                "Divorced",
+                                                                "Widowed")
+levels(project_dataset_fv$job_status) = c("Employed (self employed or paid employment [FT/PT])", "Employed (self employed or paid employment [FT/PT])", 
+                                          "Unemployed", "Retired", "Maternity leave; family care or home", "Maternity leave; family care or home", "Other", "Other",
+                                          "Other", "Other", "Other", "Other")
+levels(project_dataset_fv$ethnic_group) = c("British (English, Scottish, Welsh), Northern Irish, Irish or other white background", "British (English, Scottish, Welsh), Northern Irish, Irish or other white background", "Other ethnic group", 
+                                            "British (English, Scottish, Welsh), Northern Irish, Irish or other white background", "Other ethnic group",
+                                            "Other ethnic group", "Other ethnic group",
+                                            "Other ethnic group", "Other ethnic group",
+                                            "Other ethnic group", "Other ethnic group",
+                                            "Other ethnic group", "Other ethnic group",
+                                            "Other ethnic group", "Other ethnic group",
+                                            "Other ethnic group", "Other ethnic group",
+                                            "Other ethnic group")
+levels(project_dataset_fv$education) = c("Higher education degree or similar", 
+                                         "Higher education degree or similar", 
+                                         "Higher education degree or similar", 
+                                         "Higher education degree or similar", 
+                                         "Higher education degree or similar", 
+                                         "Higher education degree or similar", 
+                                         "College (A levels or similar)", 
+                                         "College (A levels or similar)", 
+                                         "College (A levels or similar)", 
+                                         "College (A levels or similar)", 
+                                         "College (A levels or similar)", "School (GSCE or similar)", "School (GSCE or similar)",
+                                         "School (GSCE or similar)", "School (GSCE or similar)", "School (GSCE or similar)", "None")
+
+View(project_dataset_fv)
+```
+
+## 2. Data
+
+### 2.1 Variables
+
+The following variables displayed in Table 1 were selected from the individual 
+response questionnaire to be used in the analysis:
+
+```{r table1, echo=FALSE}
+
+table1 <- tribble(
+  ~"Variable",                                ~"Description",
+  "SF-12 Mental Component Summary (MCS)",     "Single mental functioning score, ranging from 0 to 100",
+  "Sex",                                      "Sex (male/female)",
+  "Age",                                      "Age, in completed years, at the time of interview",
+  "Residential area",                      "Binary indicator classifying the address as falling into an urban or rural area",
+  "Marital status",                           "Legal marital status",
+  "Education",                                "Highest educational qualification",
+  "Job status",                               "Current employment situation",
+  "Individual monthly income",                "Total estimated net monthly income in pounds (£)",
+  "Ethnic group",                             "Ethnic group",
+  "Loneliness",                               "How often feels lonely",
+  "Parental responsibility",                  "Whether responsible for child under 16",
+  "Hours on housework per week",              "Hours spent on housework per week (e.g. cooking, cleaning, doing the laundry)"
+)
+knitr::kable((table1), booktabs = TRUE,
+caption = "Table 1: Variable names and definitions")
+```
+
+It is important to note that some variables the literature points as having an 
+influence on mental health wellbeing are not included in the selection. Consumption
+of alcohol is associated with impacts on mental health (Newton-Howes and Boden, 2016)
+but the variable in Understanding Society Wave 10 *dklm* ("How many times in the
+last four weeks have you had an alcoholic drink?") has over 90% of "inapplicable"
+answers. Similar situation is observed with *ypnpal* (number of close friends - 
+question was only asked to respondents aged 16-21) and *aidhrs* (number of hours
+spent per week on caring), both relevant aspects to mental health wellbeing 
+(Etheridge and Spantig, 2022; Madia et al., 2023). Potential implications to the
+final model are discussed later.
+
+### 2.2 Cleaning the data
+
+```{r dim original dataset, echo=TRUE}
+
+dim(project_dataset_fv)
+
+```
+
+The Understanding Society Wave 10 dataset has responses from 34,318 individuals. 
+To proceed with the analysis, some filters are applied to make sure only relevant
+observations are included. The criteria set for filtering are as follows, and each
+one was performed individually to check how many observations are dropped at each 
+stage:
+
+- Include only people aged 16 or above, since the focus is on the adult population
+  + Only 3 observations are dropped.
+
+- For individual monthly income, exclude negative values (monthly income below 0)
+  + A drop of 15 observations.
+
+- For individual monthly income, exclude very high values (monthly income > 25000)
+  + Five observations are removed.
+
+- Exclude missing values within independent variables
+  + Age: no drops.
+  + Sex: two observations removed.
+  + Residential area: 24 observations are dropped.
+  + Individual monthly income: no drops.
+  + Marital status: 1,000 observations removed.
+  + Job status: 30 observations are excluded.
+  + Ethnic group: 11 observations dropped.
+  + Loneliness: A drop of 1,385 observations.
+  + Parental responsibility: no drops.
+  + Hours on housework per week: 1,008 observations are removed.
+  + Education: 4,148 observations are dropped (13%). This might be a considered 
+reduction. Looking in the data documentation, we can see this variable has originally 
+13.57% of its observations as "inapplicable". It is not possible to know exactly the 
+reason of missingness, but we can speculate those respondents might not have had access 
+to formal education. According to the Office for National Statistics, 18.2% of the adult 
+population in England and Wales reported having no qualifications at all in the 2021 
+Census (Office for National Statistics, 2021). Nevertheless, the survey has the option of
+answering "None of the above", which probably represents people with no qualifications
+(18.85% of observations are for that answer). Hence we are not sure what the missing 
+answers might represent, but decide to drop them anyway.
+
+- Exclude missing values within the dependent variable
+  + 391 observations are excluded.
+
+After applying these filters, the final sample size is dropped to 26,296 observations 
+(a drop of roughly 23.4% from the original data sample).
+
+```{r cleaning, include=FALSE}
+project_dataset_fv_clean <- project_dataset_fv %>%
+  filter(age >= 16)
+
+project_dataset_fv_clean <- project_dataset_fv_clean %>%
+  filter(monthly_income >= 0)
+
+project_dataset_fv_clean <- project_dataset_fv_clean %>%
+  filter(monthly_income < 25000)
+
+project_dataset_fv_clean <- project_dataset_fv_clean %>%
+  drop_na(age) %>%
+  drop_na(sex) %>%
+  drop_na(urban_rural) %>%
+  drop_na(monthly_income) %>%
+  drop_na(marital_status) %>%
+  drop_na(job_status) %>%
+  drop_na(ethnic_group) %>%
+  drop_na(lonely) %>%
+  drop_na(parental_resp) %>%
+  drop_na(hours_hw) %>%
+  drop_na(education)
+
+project_dataset_fv_clean <- project_dataset_fv_clean %>%
+  drop_na(sf12mcs)
+```
+
+```{r dim cleaned sample, echo=TRUE}
+
+dim(project_dataset_fv_clean)
+
+```
+
+### 2.3 Summary statistics
+
+Table 2 shows summary statistics for the variables, grouped by sex (main independent 
+variable of the analysis). The dependent variable (SF-12 Mental Component Summary), age,
+individual monthly income and hours on housework per week are continuous (numerical) 
+variables, hence the mean, standard deviation and range were calculated for them. All 
+other variables are categorical and display the count of observations and their 
+proportion in percentage numbers in relation to the sample.
+
+Additionally, in order to make descriptive analysis and modelling more manageable,
+we reduced the number of levels in some factor variables by aggregating them. These
+variables are marital status (9 levels aggregated to 4), education (17 levels to 4), 
+job status (12 levels to 5) and ethnic group (18 levels to 2).
+
+```{r summary statistics table, echo=FALSE}
+
+project_dataset_fv_clean %>%
+  select(sf12mcs, sex, age, urban_rural, marital_status, education, job_status, 
+         monthly_income, ethnic_group, lonely, parental_resp, hours_hw) %>%
+  tbl_summary(by = sex,
+              type = list(sf12mcs ~ "continuous2", age ~ "continuous2", 
+                          urban_rural ~ "categorical", marital_status ~ "categorical",
+                          education ~ "categorical", job_status ~ "categorical",
+                          monthly_income ~ "continuous2", ethnic_group ~ "categorical",
+                          lonely ~ "categorical", parental_resp ~ "categorical",
+                          hours_hw ~ "continuous2"),
+              statistic = list(all_continuous() ~ c("{mean} ({sd})",
+                               "{min} - {max}"), all_categorical() ~ "{n} ({p}%)"),
+              digits = all_continuous() ~ 2,
+              label = list(sf12mcs ~ "SF-12 Mental Component Summary (MCS)",
+                           age ~ "Age", urban_rural ~ "Residential area", 
+                           marital_status ~ "Marital status", education ~ "Education", 
+                           job_status ~ "Job status", monthly_income ~ "Individual monthly income (£)",
+                           ethnic_group ~ "Ethnic group", lonely ~ "Loneliness",
+                           parental_resp ~ "Parental responsibility",
+                           hours_hw ~ "Hours on housework per week"),
+              missing_text = "(Missing)") %>%
+  add_overall() %>%
+  modify_header(label ~ "**Variable**") %>%
+  modify_footnote(all_stat_cols() ~ "Mean (SD) or Frequency (%)") %>%
+  modify_caption("Table 2: Summary statistics for variables used in the analysis") %>%
+  bold_labels()
+
+```
+
+It is possible to see that the mean score of the SF-12 Mental Component Summary scale is 
+46.67 for women and 49.16 for men. This is a considerable difference. To test if this 
+difference is applicable to the general population, a t-test is performed between the 
+dependent variable and the key independent variable (which is a "dummy" variable - 
+categorical with two levels, reason why a t-test is performed instead of Anova or 
+Correlation tests).
+
+## 3. Inferential Statistics
+
+```{r t-test, echo=TRUE}
+
+t.test(sf12mcs ~ sex, data = project_dataset_fv_clean)
+
+```
+The level of significance (p-value) adopted is the conventional value of 0.05. By
+running the t-test, we tested the null hypothesis that there is no statistical 
+difference between the average mean Mental Component Summary score for men and 
+women in the population. The p-value obtained is smaller than 0.05, thus we reject
+the null hypothesis.
+
+## 4. Visualising the output variable
+
+Plot 1 is a histogram of the distribution of the SF-12 MCS variable for the whole 
+sample. We can see the distribution is skewed to the right with a peak of observations 
+around 56-57 rating scores. Important to note the plots here use linear scale - when 
+plotting the MCS score with a logarithmic scale, the distribution appeared more
+skewed to the right than with the linear scale. Moreover, we had to filter out one
+observation that has a MCS score equal to zero. Finally, the range of values within
+the dependent variable is small (i.e. the maximum values are not considerably larger
+than the minimum values) hence linear scale is more appropriate for this case.
+
+```{r plot univariate distribution SF-12 MCS, echo=FALSE, message=FALSE}
+
+library(ggplot2)
+
+project_dataset_fv_clean %>%
+  ggplot(aes(sf12mcs)) +
+  geom_histogram() +
+  labs(title = "Plot 1: Distribution of SF-12 Mental Component Summary",
+       subtitle = "Scores for adult population (aged 16 and over)",
+       x = "SF-12 MCS score",
+       y = "Count",
+       caption = "Source: Understanding Society Wave 10 (2018-2019)") +
+  theme_minimal()
+```
+
+```{r univariate distribution SF-12 MCS with log scale, include=FALSE}
+
+# Plotting with a log scale
+project_dataset_fv_clean %>%
+  filter(sf12mcs > 0) %>%
+  ggplot(aes(sf12mcs)) +
+  geom_histogram() +
+  labs(title = "Plot 1: Distribution of SF-12 Mental Component Summary",
+       subtitle = "Logarithmic scale",
+       x = "SF-12 MCS score",
+       y = "Count",
+       caption = "Source: Understanding Society Wave 10 (2018-2019)") +
+  theme_minimal() +
+  scale_x_log10()
+```
+
+The density plot (Plot 2) shows the SF-12 MCS score distribution divided by sex. From 
+this graph it is possible to notice the distribution for men is slightly more skewed to
+the right than for women, which indicates men tend to have higher SF-12 MCS score
+than women. The maximum number of observations is also higher for males males than 
+females, and occurs at approximately the same value of the MCS.
+
+```{r bivariate distribution by sex, echo=FALSE}
+
+median <- project_dataset_fv_clean %>%
+  group_by(sex) %>%
+  summarise(median = median(sf12mcs))
+
+project_dataset_fv_clean %>%
+  ggplot(aes(sf12mcs)) +
+  geom_density(aes(fill = sex), alpha = 0.5) +
+  geom_vline(data = median, aes(xintercept = median, color = sex),
+             linewidth = 0.5) +
+  labs(title = "Plot 2: Distribution of SF-12 Mental Component Summary by sex",
+       subtitle = "Scores for adult population (aged 16 and over)",
+       x = "SF-12 MCS score",
+       y = "Density",
+       caption = "Source: Understanding Society Wave 10 (2018-2019)") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+```
+
+The vertical lines represent the median SF-12 MCS scores both for men and women.
+The median for men is higher than for women.
+
+## 5. Analysis - linear regression and model building
+
+After demonstrating there is a statistically significant difference in the average
+MCS score of males and females in the t-test, the difference is tested by
+controlling for other characteristics in the UK adult population. These characteristics 
+(or variables) were selected based on the literature review that indicated the most
+commonly influencing factors on mental health and gender differences. To do this,
+Ordinary Least Squares (OLS) regression models are calculated. OLS estimates the line
+to best describe the linear relationship between a predictor and an outcome variable
+(in bivariate regression models) or a multidimensional plane in multiple regression
+models (Fogarty, 2019).
+
+Therefore, five regression models are presented in Table 3:
+
+- Model 1 (M1, the bivariate model): the baseline model with the dependent variable
+(SF-12 MCS) and the key independent variable of the analysis (sex).
+- Model 2 (M2, demographic factors model): M1 added with the age, marital status,
+highest level of education and ethnic group variables.
+- Model 3 (M3, economic factors model): M2 with addition of job status and 
+individual net monthly income variables.
+- Model 4 (M4, residential factors model): M3 added with residential area variable.
+- Model 5 (M5, social and care factors model): M4 with addition of loneliness,
+parental responsibility and hours per week on housework variables.
+
+```{r model 1, include=FALSE}
+
+m1 <- project_dataset_fv_clean %>%
+  lm(sf12mcs ~ sex, data = .)
+
+m1 %>% summary()
+```
+
+```{r model 2, include=FALSE}
+
+m2 <- project_dataset_fv_clean %>%
+  lm(sf12mcs ~ sex + age + marital_status + education + ethnic_group, data = .)
+
+m2 %>% summary()
+
+```
+
+```{r model 3, include=FALSE}
+
+m3 <- project_dataset_fv_clean %>%
+  lm(sf12mcs ~ sex + age + marital_status + education + ethnic_group + job_status +
+       monthly_income, data = .)
+
+m3 %>% summary()
+
+```
+
+```{r model 4, include=FALSE}
+
+m4 <- project_dataset_fv_clean %>%
+  lm(sf12mcs ~ sex + age + marital_status + education + ethnic_group + job_status +
+       monthly_income + urban_rural, data = .)
+
+m4 %>% summary()
+
+```
+
+```{r model 5, include=FALSE}
+
+m5 <- project_dataset_fv_clean %>%
+  lm(sf12mcs ~ sex + age + marital_status + education + ethnic_group + job_status +
+       monthly_income + urban_rural + lonely + parental_resp + hours_hw, data = .)
+
+m5 %>% summary()
+
+```
+
+```{r regression results table texreg, results='asis', echo=FALSE}
+
+texreg::htmlreg(list(m1, m2, m3, m4, m5),
+                groups = list("Marital status (Ref: Single)" = 4:6,
+                              "Education (Ref: Higher education degree or similar)" = 7:9,
+                              "Ethnic group (Ref: British (English, Scottish, Welsh), Northern Irish, Irish or other white background)" = 10,
+                              "Job status (Ref: Employed (self employed or paid employment [FT/PT])" = 11:14,
+                              "Residential area (Ref: Urban area)" = 16,
+                              "Loneliness (Ref: Hardly ever or never)" = 17:18,
+                              "Parental responsibility (Ref: Yes)" = 19),
+                caption = "Table 3: Regression results for SF-12 MCS (dependent variable)",
+                caption.above = TRUE,
+                custom.model.names = c("M1", "M2", "M3", "M4", "M5"),
+                custom.coef.names = c("Intercept", "Female", "Age (Years)", 
+                          "Married", "Divorced", "Widowed",
+                          "College (A levels or similar)", "School (GSCE or similar)",
+                          "None", "Other ethnic group", "Unemployed", "Retired",
+          "Maternity leave; family care or home", "Other",
+          "Individual monthly income (£)", "Rural area", "Some of the time", "Often",
+          "No", "Hours on housework per week"))
+
+```
+
+Model 1 presents the relationship between the key independent and dependent variables. As
+demonstrated previously with the inferential test, men tend to have higher average SF-12 
+MCS scores than women. In this bivariate model, the average difference is of 2.49 points.
+Adjusted R-squared value of 0.013 indicates this model explains 1.3% of the variance in 
+the SF-12 MCS variable values.
+
+In Model 2 the relationship between the main pair of variables is controlled by 
+adding demographic variables such as age, marital status, highest level of education
+and ethnic group. In the literature age has a positive correlation with mental health
+wellbeing (i.e. the gender gap in mental health decreases as people get older) (Kiely
+et al., 2019). This is also observed in this model as for one year increase in age,
+MCS scores are expected to increase 0.13 points on average. Being married has been
+associated with better mental health (Strohschein et al., 2005) and decreased odds of
+using mental health services (Dolja‑Gore et al., 2018) in Canada and Australia,
+respectively. This model reflects something similar for the UK population since married
+status is associated with higher MCS score (1.74 points) and divorced people have
+scored lower in the scale when compared to the reference category (single). Widowed
+status is not statistically significant.
+
+Higher levels of education were significantly linked to having a protective effect
+against anxiety and depression (Bjelland et al., 2008). In Model 2, people with no
+educational qualifications scored on average 1.05 points less in the MCS scale when
+compared with people with degrees (reference category). College or school levels were
+not statistically significant. When it comes to race and ethnicity, black and minority
+ethnic communities appear to be at greater risk of developing mental health illnesses
+in the UK (Bamford et al., 2021). Nevertheless, in this model there was not a
+statistically significant difference between MCS scores of white/British communities
+(reference) when compared with other minorities. Overall, controlling for demographic
+variables in Model 2 resulted in a decrease in the mental health gender gap, which is
+expected due to the multifactorial nature of mental health wellbeing.
+
+In Model 3 economic factors were introduced. Job insecurity has strong evidence from
+the literature to be associated with mental distress (Chum et al., 2022) whilst income
+deprivation is a key driver of mental health inequalities, with women's mental health
+being potentially more sensitive to poverty (Thomson et al., 2023). In the model,
+Unemployed, maternity leave / family care or home and other employment situations
+appear to have a negative impact on mental health functioning when compared to self
+and paid employment (ref.). Conversely being retired seems to be associated
+with higher MCS scores. As for individual monthly income, despite being statistically
+significant, its positive association with the MCS score is very marginal: an increase
+of £1000 in monthly income represents an average increase of 0.14 points on the mental
+wellbeing scale.
+
+Interesting to note that the School (GSCE or similar) category on the highest educational
+level variable is now statistically significant with higher average score than the
+higher education degree level. Alternatively, the category indicating no educational
+qualifications is no longer significant. Furthermore, the other ethnic group category
+has become statistically significant in Model 3 with higher average score than the
+white/British ethnicity level. These changes between Models 2 and 3 are rather odd as
+they contradict what the wider literature indicates. Despite that, adjusted R-squared
+measure for Model 3 indicates it explains approximately 10% of the variation in the
+SF-12 MCS scores.
+
+Model 4 accounts for residential area characteristics. In the UK, people living in
+urban areas are more likely to suffer poor physical and mental health than rural 
+populations (Harriss and Hawton, 2011). This reflects in the model as people residing
+in rural regions present on average one point (1.0) higher scores in the MCS scale
+than those living in urban areas (ref.). Adjusted R-Squared and the gender gap in the
+MCS scale remain roughly the same as Model 3 though.
+
+In Model 5, the variables that account for frequency of feeling lonely, parental 
+responsibility and hours in housework per week are added. Loneliness is correlated
+with worse mental and physical functioning (Lee et al., 2019). People that often feel
+lonely are likely to have lower MCS scores by roughly 16 points on average when
+compared to those who hardly ever or never feel solitary (ref). It is also reported
+that the disproportional burden of unpaid child and house care on women has a negative
+correlation on their mental health. However, both variables for parental responsibility
+and hours on housework appear to be not statistically significant in Model 5. This most 
+comprehensive model explains 30% of the variation in the MCS scale, and the gender gap in
+mental health is estimated at 1.37 points.
+
+Important to note in Model 5 that the married and divorced status are no longer
+significant as they were in previous models, whereas widowed is now statistically
+significant. Something similar seems to happen in the education variable with the
+College category. The individual monthly income variable has also become not
+significant in this last model.
+
+These changes between models may indicate some of the assumptions of the linear 
+model are being violated. Therefore, in the next session the robustness of
+the model is tested before the final discussion and conclusions.
+```{r regression results table tab_model(), include=FALSE}
+
+# Another way of showing regression results with tab_model()
+
+tab_model(m1, m2, m3, m4, m5,
+          dv.labels = c("M1", "M2", "M3", "M4", "M5"),
+          show.ci = FALSE,
+          p.style = "stars",
+          collapse.se = TRUE,
+          pred.labels = c("Intercept", "Female", "Age (Years)", 
+                          "Marital status [Married]", "Marital status [Divorced]",
+                          "Marital status [Widowed]",
+                          "Education [College (A levels or similar)]",
+                          "Education [School (GSCE or similar)]",
+                          "Education [None]", "Ethnic group [Other ethnic group]",
+          "Job status [Unemployed]", "Job status [Retired]",
+          "Job status [Maternity leave; family care or home]", "Job status [Other]",
+          "Individual monthly income (£)", "Residential area [Rural area]",
+          "Loneliness [Some of the time]", "Loneliness [Often]",
+          "Parental responsibility [No]", "Hours on housework per week"))
+```
+
+```{r regression results table tbl_regression(), include=FALSE}
+
+# Another option for regression tables using functions from the gtsummary package
+
+rt1 <- m1 %>% tbl_regression(estimate_fun = function(x) style_number(x, digits = 2),
+                             intercept = TRUE, 
+                             label = list(sex ~ "Sex")) %>%
+  modify_column_hide(column = ci) %>%
+  modify_column_unhide(column = std.error) %>%
+  add_significance_stars()
+
+rt2 <- m2 %>% tbl_regression(estimate_fun = function(x) style_number(x, digits = 2),
+                             intercept = TRUE,
+                             label = list(sex ~ "Sex", age ~ "Age (Years)", 
+                           marital_status ~ "Marital status", education ~ "Education",
+                           ethnic_group ~ "Ethnic group")) %>%
+  modify_column_hide(column = ci) %>%
+  modify_column_unhide(column = std.error) %>%
+  add_significance_stars()
+
+rt3 <- m3 %>% tbl_regression(estimate_fun = function(x) style_number(x, digits = 2),
+                             intercept = TRUE,
+                             label = list(sex ~ "Sex", age ~ "Age (Years)", 
+                           marital_status ~ "Marital status", education ~ "Education", 
+                           job_status ~ "Job status", monthly_income ~ "Individual monthly income (£)",
+                           ethnic_group ~ "Ethnic group")) %>%
+  modify_column_hide(column = ci) %>%
+  modify_column_unhide(column = std.error) %>%
+  add_significance_stars()
+
+rt4 <- m4 %>% tbl_regression(estimate_fun = function(x) style_number(x, digits = 2),
+                             intercept = TRUE,
+                             label = list(sex ~ "Sex", age ~ "Age (Years)",
+                                          urban_rural ~ "Residential area", 
+                           marital_status ~ "Marital status", education ~ "Education", 
+                           job_status ~ "Job status", monthly_income ~ "Individual monthly income (£)",
+                           ethnic_group ~ "Ethnic group")) %>%
+  modify_column_hide(column = ci) %>%
+  modify_column_unhide(column = std.error) %>%
+  add_significance_stars()
+
+rt5 <- m5 %>% tbl_regression(estimate_fun = function(x) style_number(x, digits = 2),
+                             intercept = TRUE,
+                             label = list(sex ~ "Sex", age ~ "Age (Years)",
+                                          urban_rural ~ "Residential area", 
+                           marital_status ~ "Marital status", education ~ "Education", 
+                           job_status ~ "Job status", monthly_income ~ "Individual monthly income (£)",
+                           ethnic_group ~ "Ethnic group", lonely ~ "Loneliness",
+                           parental_resp ~ "Parental responsibility",
+                           hours_hw ~ "Hours on housework per week")) %>%
+  modify_column_hide(column = ci) %>%
+  modify_column_unhide(column = std.error) %>%
+  add_significance_stars()
+
+
+tbl_merge(list(rt1, rt2, rt3, rt4, rt5))
+
+```
+
+## 6. OLS Assumptions and Model Diagnostics
+
+There are a number of assumptions linear regression (and specifically OLS) makes
+about the data, variables and estimates. If assumptions are not satisfied it is not
+possible to be sure if our predictions are correct (Fogarty, 2019).
+
+Best Linear Unbiased Estimator (BLUE) assumptions are crucial to ensure estimates
+minimise error variance (best or efficient, i.e. standard errors are not biased upwards
+or downwards) and reflect on average the true population parameter (i.e. coefficients
+are not biased). In order for the model to be BLUE, it is important to check if the
+four assumptions from the Gauss–Markov theorem hold (Fogarty, 2019). These are:
+
+1. Predictor variables are independent of each other (exogenous variables)
+2. Correct functional form (a linear relationship between predictors and outcome variable)
+3. Errors have constant variance (homoscedasticity)
+4. No autocorrelation between errors (independent observations)
+
+Additionally to the BLUE assumptions, there are other three assumptions of the OLS
+that have implications for regression results (Fogarty, 2019). Although not as 
+crucial as the BLUE ones, here we also test for them:
+
+5. Errors are normally distributed
+6. There is no multicollinearity between variables (predictors are not functions of
+one other)
+7. There are no influential data points (influential outliers)
+
+In this report, the author opted to follow the order of the tutorial exercises to
+test the assumptions.
+
+### 6.1 Influential outliers (Additional assumption #7)
+
+```{r influential outliers, echo=TRUE}
+m5 %>%
+  plot(which = 5) %>%
+  title(main = "Plot 3: Residuals vs. Leverage for M5")
+```
+
+Influential data points are tested by looking at Cook's distance lines, "which measures
+the effect of each observation on the regression coefficients" (Fogarty, 2019, p.222).
+If a point is flagged by the Cook's distance, it is considered an influential outlier.
+Points with a Cook's distance greater than 0.5 are considered high, whereas those with
+distance equal or greater than 1 are extreme influential outliers (Fogarty, 2019).
+
+Here there are no Cook's distance margins showing in the plot, thus there are no
+influential outliers in our data.
+
+### 6.2 Correct functional form (BLUE #2)
+
+```{r non-linearity, echo=TRUE}
+m5 %>%
+  plot(which = 1) %>%
+  title(main = "Plot 4: Residuals vs. Fitted for M5")
+```
+
+In the Residuals vs. Fitted plot, it is possible to see a non-linear pattern in Model 5
+(red line is not completely flat, indicating the conditional mean of the error term is 
+not 0). To confirm a potential non-linearity in the model, we also run a Ramsay RESET 
+test where the null hypothesis is that the functional form of the model is correct.
+
+```{r RESET test, echo=TRUE}
+resettest(m5, power = 2:3, type = "fitted")
+```
+
+The RESET test compares if a new version of our model with predicted values in a
+non-linear form "explains significantly more variance in the outcome variable than our 
+original model" (Fogarty, 2019, p.219). As the p-value is below 0.05, the null hypothesis
+is discarded. Therefore, we assume the model has a non-linear functional form.
+
+### 6.3 Errors normally distributed (Additional assumption #5)
+
+```{r q-q plot, echo=TRUE}
+m5 %>%
+  plot(which = 2) %>%
+  title(main = "Plot 5: Q-Q Residuals for M5")
+```
+
+Normally distributed errors are desired because it allows us to generalise the estimates
+from the sample data to the population. However, violating normality does not mean
+estimates are wrong, just that we cannot be confident to apply them to statements about
+the general population (Fogarty, 2019).
+
+The Q-Q plot shows the errors in M5 are not normally distributed. If they were, the
+points should sit on the 45 degree line. Instead, we observe a departure especially in
+the lower end of the distribution. The plot of the SF-12 MCS variable (Plot 1) was skewed
+to the right, hence this is not unexpected.
+
+### 6.4 Errors have constant variance (BLUE #3)
+
+```{r heteroscedasticity, echo=TRUE}
+m5 %>%
+  bptest()
+```
+
+The Residuals vs. Fitted plot may present a pattern of distribution in the residuals,
+although this is not obvious. To verify if the model presents heteroscedasticity,
+we run the Breusch–Pagan test. The null hypothesis is that the model has constant error
+variance (homoscedasticity). The test returns a p-value below the level of significance
+(p < 0.05), hence we reject the null hypothesis and assume we have an issue of 
+heteroscedasticity.
+
+Heteroscedasticity makes estimates inefficient and standard errors biased downwards.
+When standard errors are smaller than they should be, we may encounter statistically
+significant variables which in fact are not (Fogarty, 2019).
+
+### 6.5 No multicollinearity between variables (Additional assumption #6)
+
+```{r multicollinearity, echo=TRUE}
+m5 %>%
+  vif()
+```
+
+Multicollinearity is present when two or more independent variables are functions of
+one other. The variance inflation factor (VIF) test measures how much common variance
+there is between predictors. VIF value of 1 represent no multicollinearity, and anything
+below 5 does not cause concern; if it is equal or higher than 10, then it is likely
+we have issues (Fogarty, 2019).
+
+The results of the VIF test for M5 are low, therefore multicollinearity is not a problem
+in our model.
+
+### 6.6 Exogenous variables (BLUE #1)
+
+Endogeneity problems occur when there is omitted-variable bias (OVB), which means key
+predictor variable(s) might have been excluded from the model. Since there is no test that
+can tell which variables are missing in our model, the best approach to diagnose this
+issue is reviewing the theory on the subject (Fogarty, 2019).
+
+As mentioned in section 2.1 (Variables), some of the key variables the literature on 
+mental health highlights as relevant have a high level of missingness within the 
+Understanding Society Wave 10 dataset (the case of *dklm* - number of times in the last 
+four weeks respondent has had an alcoholic drink -, *ypnpal* - number of close friends - 
+and *aidhrs* - number of hours spent per week on caring). Furthermore, the variable in 
+our model measuring the frequency of loneliness may have an endogenous relationship with
+the dependent variable SF-12 MCS. Our hypothesis is that people who often feel lonely
+have lower scores in the MCS scale (low functioning mental health). Alternatively, those
+with poorer mental health might be more likely to suffer with illnesses like depression
+or anxiety, which may lead them to feelings of loneliness more frequently.
+
+Based on those reflections, our model is likely to have endogeneity issues.
+
+### 6.7 No autocorrelation (independent observations) (BLUE #4)
+
+One of the assumptions of the Gauss–Markov theorem is that residuals should be 
+independent (i.e. knowing something about a particular realisation of a residual should 
+not help predict the value of another observation). Problems of autocorrelation are 
+associated with spatial, longitudinal and time series datasets (Fogarty, 2019).
+
+To check for autocorrelation, we should look at the data documentation. Understanding 
+Society is a panel survey of UK households with yearly interviews. In this project
+we are looking at data from the individual questionnaire instead of the household 
+questionnaire. Despite that, we might have some clustering as all adults in the same 
+household respond the individual questionnaire, hence are more likely to be correlated.
+This might not be a big issue as there is a large number of households and few people per
+household. Nevertheless, here we apply cluster robust standard errors to estimate a new
+model. We assume residuals are correlated within a group (variable *j_hidp*, which 
+specifies the household of respondents) but are independent between groups.
+
+```{r cluster robust standard errors, echo=TRUE}
+project_dataset_fv_clean %>%
+  lm.cluster(data = .,
+             sf12mcs ~ sex + age + marital_status + education + ethnic_group +
+               job_status + monthly_income + urban_rural + lonely + parental_resp + 
+               hours_hw,
+             cluster = "j_hidp") %>%
+  summary()
+```
+
+As expected, there is not a considerable difference from our original model.
+
+Furthermore, there is also a possibility of spatial or temporal clustering. It might be 
+that there is some autocorrelation between people in the same city/region/area. Here we 
+have controlled for urban and rural areas. As for clustering over time, we
+assume this does not occur in our data as we are looking at one specific wave of the 
+Understanding Society survey. Thus our data is cross-sectional (one point in time) and 
+not longitudinal.
+
+All in all, we conclude we do not have autocorrelation issues. Table 4 summarises the 
+results of model diagnostics.
+
+```{r model diagnostics, echo=FALSE}
+table4 <- tribble(
+  ~"Assumption",                             ~"Issue?", ~"Plan",
+  "**BLUE Assumptions**",     "", "",
+  "1. Predictor variables are independent of each other", "Yes", "Drop *lonely* variable?",
+  "2. Correct functional form", "Yes", "Take logarithm of dependent variable?",
+  "3. Errors have constant variance", "Yes", "Correct with robust standard errors",
+  "4. No autocorrelation between errors (independent observations)", "No", "NA",
+  "**Additional Assumptions**", "", "",
+  "5. Errors are normally distributed", "Yes", "Take logarithm of dependent variable?",
+  "6. There is no multicollinearity between variables", "No", "NA",
+  "7. There are no influential data points", "No", "NA"
+)
+knitr::kable((table4), booktabs = TRUE,
+caption = "Table 4: Model diagnostics results for M5")
+```
+
+### 6.8 Refining for a final model
+
+To correct for endogeneity, we dropped the *lonely* variable and compared the regression 
+results with the original model. Firstly, the adjusted R-squared decreased from 30% to 
+10%. Secondly, there are changes in the significance of some variables/categories:
+for example, parental responsibility and monthly income are now statistically 
+significant, whereas college education and being widowed are not. Finally, running some
+of the tests for the other assumptions, the Q-Q plot seems more detached from the 
+45-degree line than when the model includes the variable - indicating we are less 
+confident to generalise the estimates to statements about the population.
+
+Furthermore, some of the literature on the subject has included similar variable to
+measure level of loneliness in their analysis (Etheridge and Spantig, 2022). Based on
+these factors, we decided to keep *lonely* in the model, as removing it seemed to cause
+more omitted-variable bias.
+
+For incorrect functional form and errors not normally distributed, we tried a semi-log
+version of our model by transforming the dependent variable. Re-running the tests (plots 
+and RESET test results below), it seems the semi-log model is causing more violation of 
+these assumptions than the original model. This is not unexpected since in section 4 the
+histogram with the log version of SF-12 MCS was more skewed than the one with the linear
+scale. Hence, we conclude the linear model is more suitable in this case.
+
+
+```{r refining, include=FALSE}
+
+# Correction 1: Predictor variables are not independent of each other -> drop lonely variable
+
+m5_drop <- project_dataset_fv_clean %>%
+  lm(sf12mcs ~ sex + age + marital_status + education + ethnic_group + job_status +
+       monthly_income + urban_rural + parental_resp + hours_hw, data = .)
+m5_drop %>% summary()
+
+m5_drop %>%
+  plot(which = 2)
+
+m5_drop %>%
+  bptest()
+
+resettest(m5_drop, power = 2:3, type = "fitted")
+
+m5_drop %>%
+  vif()
+
+# Conclusions - Adj. R-squared drops to 0.1. Maybe should keep it based on literature?
+
+# Correction 2: Incorrect functional form + errors not normally distributed -> log of sf12mcs
+
+m5_log <- project_dataset_fv_clean %>%
+  filter(sf12mcs > 0) %>%
+  mutate(log_sf12mcs = log(sf12mcs)) %>%
+  lm(log_sf12mcs ~ sex + age + marital_status + education + ethnic_group + job_status +
+       monthly_income + urban_rural + lonely + parental_resp + hours_hw, data = .)
+
+m5_log %>%
+  plot(which = 1)
+
+resettest(m5_log, power = 2:3, type = "fitted")
+
+m5_log %>%
+  plot(which = 2)
+
+# Conclusions - does not look good. Maybe we should keep the linear scale?
+
+# Correction 3: Heteroscedasticity -> correct with robust standard errors
+
+m5_SE <- coeftest(m5, vcov = vcovHC(m5, type = "HC0"))
+
+# Conclusions - ok
+```
+
+```{r comparing m5 and m5_log, include=FALSE, message=FALSE, results='asis'}
+texreg::htmlreg(list(m5, m5_log))
+```
+
+```{r comparing m5 and m5_SE, include=FALSE, message=FALSE, results='asis'}
+texreg::htmlreg(list(m5, m5_SE))
+```
+
+```{r plots and reset test for m5_log, echo=FALSE}
+m5_log %>%
+  plot(which = 1) %>%
+  title(main = "Plot 6: Residuals vs. Fitted for Semi-Log M5")
+
+resettest(m5_log, power = 2:3, type = "fitted")
+
+m5_log %>%
+  plot(which = 2) %>%
+  title(main = "Plot 7: Q-Q Residuals for Semi-Log M5")
+```
+
+Finally, we correct Model 5 for heteroscedasticity with robust standard errors,
+presenting it as Model 6 (our selected final specification). No major changes in
+statistical significance are observed.
+
+```{r final model, echo=FALSE, results='asis'}
+texreg::htmlreg(m5_SE,
+                groups = list("Marital status (Ref: Single)" = 4:6,
+                              "Education (Ref: Higher education degree or similar)" = 7:9,
+                              "Ethnic group (Ref: British (English, Scottish, Welsh), Northern Irish, Irish or other white background)" = 10,
+                              "Job status (Ref: Employed (self employed or paid employment [FT/PT])" = 11:14,
+                              "Residential area (Ref: Urban area)" = 16,
+                              "Loneliness (Ref: Hardly ever or never)" = 17:18,
+                              "Parental responsibility (Ref: Yes)" = 19),
+                caption = "Table 5: Final model for SF-12 MCS (dependent variable)",
+                caption.above = TRUE,
+                custom.model.names = c("Model 6"),
+                custom.coef.names = c("Intercept", "Female", "Age (Years)", 
+                          "Married", "Divorced", "Widowed",
+                          "College (A levels or similar)", "School (GSCE or similar)",
+                          "None", "Other ethnic group", "Unemployed", "Retired",
+          "Maternity leave; family care or home", "Other",
+          "Individual monthly income (£)", "Rural area", "Some of the time", "Often",
+          "No", "Hours on housework per week"))
+```
+
+## 7. Discussion and conclusion
+
+This paper tested whether there is a gender gap in the UK adult population mental 
+health in 2018-2019. For this aim, data from the Understanding Society Wave 10 was used. 
+We also controlled for other characteristics that have an influence on mental wellbeing 
+according to the literature.
+
+It is possible to conclude there is indeed a gap in the Mental Component Summary scale 
+when comparing scores for men and women. On average, men present higher scores than 
+women, which means they have higher functioning mental health. In the bivariate model,
+this difference was of 2.49 points. In our final model, where we also controlled for 
+demographic, socioeconomic, residential and care factors, the gap reduced to 1.37 points.
+The difference remained statistically significant.
+
+The model does not provide an explanation on the reasons for this gap though. There might
+be a relation with women being likely to experience loneliness more often than
+men (Etheridge and Spantig, 2022; Kiely et al., 2019). Summary statistics for our sample 
+show 9.1% of females often feel lonely and 34% feel it sometimes, against 6.4% and 27% of
+males respectively. Dropping the variable that accounts for loneliness also decreased 
+the goodness of fit of our model by nearly 20%. We might question what are the underlying
+causes of women's self-perception of loneliness on further research.
+
+Furthermore, our model presents some limitations. Relevant variables previous research
+indicate as relevant had a considerable proportion of missingness in our dataset. For
+instance, there has been a correlation between the number of hours spent in care and the
+gender gap in mental health (Madia et al., 2023). Including this and other variables 
+could have had an impact on the average difference of the MCS scores between genders.
+
+There were also some issues with some assumptions of the linear model. Nevertheless,
+we have attempted to correct the violations and come to the conclusion the final model
+specified is the most robust we can do within the conditions. "Sometimes we have to just 
+throw up our hands and accept that we have done the best we can" (Fogarty, 2019, p.245).
+
+## Word count
+
+```{r word count, echo=FALSE}
+
+table6 <- tribble(
+  ~"Method", ~"koRpus", ~"stringi",
+  "Word count",     "4244 words", "4032 words",
+  "Character count", "26901 characters", "26900 characters",
+  "Sentence count", "298 sentences", "Not available",
+  "Reading time", "21.2 minutes", "20.2 minutes"
+)
+knitr::kable((table6), booktabs = TRUE,
+caption = "Table 6: Word count")
+```
+
+## Reflective statement
+
+This was probably the most challenge course I had this semester. Nevertheless, I am proud
+of the learning I did and the final result of my project. With that in mind, I would say
+my assignment should be awarded at least a B1. I believe I have covered all the points 
+listed in the assignment brief. I provided a clear research question, a rationale and a 
+substantive literature review. An appropriate dataset was selected and the data was 
+cleaned and processed. Summary statistics and data visualisations were presented. After 
+that, five regression models were provided and discussed, with the most comprehensive one
+being tested for the assumptions of the linear model. Finally, a considerable robust 
+model is produced and the research question is answered.
+
+## Bibliography
+
+Bamford, J., Klabbers, G., Curran, E., Rosato, M., and Leavey, G. 2021. Social 
+Capital and Mental Health Among Black and Minority Ethnic Groups in the UK. *Journal 
+of Immigrant and Minority Health*. **23**, pp. 502–510.
+
+Bjelland, I., Krokstad, S., Mykletun, A., Dahl, A., Tell, G., and Tambs, K. 2008.
+Does a higher educational level protect against anxiety and depression? The HUNT 
+study. *Social Science & Medicine*. **66**, pp. 1334-1345.
+
+Chum, A., Kaur, S., Teo, C., Nielsen, A., Muntaner, C., and O'Campo, P. 2022. The 
+impact of changes in job security on mental health across gender and family 
+responsibility: evidence from the UK Household Longitudinal Study. *Social Psychiatry
+and Psychiatric Epidemiology*. **57**, pp. 25-36.
+
+Dolja‑Gore, X., Loxton, D., D'Este, C., Blyth, F., and Byles, J. 2018. Differences in
+Use of Government Subsidised Mental Health Services by Men and Women with Psychological 
+Distress: A Study of 229,628 Australians Aged 45 Years and Over. *Community Mental
+Health Journal*. **54**, pp. 1008-1018.
+
+Etheridge, B. and Spantig, L. 2022. The gender gap in mental well-being at the onset
+of the Covid-19 pandemic: Evidence from the UK. *European Economic Review*. **145**.
+
+Fogarty, B. J. 2019. *Quantitative social science data with R: an introduction*.
+[Online]. London: SAGE Publications. [Accessed 20 December 2023]. Available from:
+https://catalyst.talis.com/glasgow/books/9781526459749.
+
+Harriss, L. and Hawton, K. 2011. Deliberate self-harm in rural and urban regions: A 
+comparative study of prevalence and patient characteristics. *Social Science & Medicine*.
+**73**, pp. 274-281.
+
+Kiely, K. M., Brady, B., and Byles, J. 2019. Gender, mental health and ageing.
+*Maturitas*. **129**, pp. 76-84.
+
+Lee, E., Depp, C., Palmer, B., Glorioso, D., Daly, R., Liu, J., Tu, X., Kim, H.,
+Tarr, P., Yamada, Y., and Jeste, D. 2019. High prevalence and adverse health effects
+of loneliness in community-dwelling adults across the life span: role of wisdom as
+a protective factor. *International Psychogeriatrics*. **31**(10), pp. 1447-1462.
+
+Madia, J., Moscone, F., and Nicodemo, C. 2023. Studying informal care during the
+pandemic: mental health, gender and job status. *Economics & Human Biology*. **50**.
+
+Newlove-Delgado, T., Marcheselli, F., Williams, T., Mandalia, D., Davis, J., 
+McManus, S., . . . & Ford, T. 2022. *Mental health of children and young people in
+England, 2022*. Leeds, UK: NHS Digital.
+
+Newton-Howes, G., and Boden, J. M. 2016. Relation between age of first drinking 
+and mental health and alcohol and drug disorders in adulthood: evidence from a 
+35-year cohort study. *Addiction*. **111**(4), pp. 637-644.
+
+Office for National Statistics. 2021. *Education, England and Wales: Census 2021*.
+[Online]. [Accessed 19 December 2023]. Available from: https://www.ons.gov.uk/peoplepopulationandcommunity/educationandchildcare/bulletins/educationenglandandwales/census2021
+
+Patalay, P. and Demkowicz, O. 2023. Debate: Don’t mind the gap – why do we not care
+about the gender gap in common mental health difficulties?. *Child and Adolescent
+Mental Health*. **28**(2), pp. 341-343.
+
+Spencer, L. and Broome, M. 2023. Commentary: Closing the gender gap in depression
+through the lived experience of young women – a response to ‘Don’t mind the gap:
+Why do we not care about the gender gap in mental health?’, Patalay and Demkowicz
+(2023). *Child and Adolescent Mental Health*. **28**(2), pp. 344-346.
+
+Strohschein, L., McDonough, P., Monette, G., and Shao, Q. 2005. Marital transitions
+and mental health: Are there gender differences in the short-term effects of marital 
+status change?. *Social Science & Medicine*. **61**(11), pp. 2293-2303.
+
+Thomson, R., Kopasker, D., Leyland, A., Pearce, A., and Vittal Katikireddi, S. 2023.
+Effects of poverty on mental health in the UK working-age population: causal analyses 
+of the UK Household Longitudinal Study. *International Journal of Epidemiology*.
+pp. 512–522.
+
+University of Essex. 2023a. *Understanding Society - The UK Household Longitudinal 
+Study*. [Online]. [Accessed 30 October 2023]. Available from: 
+https://www.understandingsociety.ac.uk/.
+
+University of Essex, Institute for Social and Economic Research. 2023b. *Understanding
+Society* [data series]. UK Data Service, _10th Release_. [Accessed 30 October 2023].
+SN: 2000053, DOI: http://doi.org/10.5255/UKDA-Series-2000053.
